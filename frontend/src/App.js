@@ -10,6 +10,8 @@ import Settings from "./components/Settings";
 import Help from "./components/Help";
 import PaymentPage from "./components/PaymentPage";
 import AuthCallback from "./components/AuthCallback";
+import ManageAccounts from "./components/ManageAccounts";
+import SubscribePage from './components/SubscribePage';
 
 function App() {
   return (
@@ -25,6 +27,8 @@ function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/help" element={<Help />} />
         <Route path="/payment" element={<PaymentPage />} />
+        <Route path="/manage-accounts" element={<ManageAccounts />} />
+        <Route path="/subscribe" element={<SubscribePage />} />
       </Routes>
     </Router>
   );

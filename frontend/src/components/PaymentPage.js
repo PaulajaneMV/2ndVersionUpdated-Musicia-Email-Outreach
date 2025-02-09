@@ -65,24 +65,42 @@ const PaymentForm = ({ campaignId, amount }) => {
       if (error) throw new Error(error.message);
 
       if (paymentIntent?.status === "succeeded") {
-        await axios.post(
-          `http://localhost:5000/api/payment/confirm/${campaignId}`,
-          {},
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-        message.success("Payment successful!");
-        navigate('/email-campaigns');
+        handlePaymentSuccess();
       }
     } catch (error) {
       console.error('Payment error:', error);
       message.error(error.message || "Payment failed. Please try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePaymentSuccess = async () => {
+    try {
+      // Update campaign payment status
+      await axios.post(
+        `http://localhost:5000/api/payment/confirm/${campaignId}`,
+        {},
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      message.success('Payment successful!');
+      
+      // Navigate back to email campaigns
+      navigate('/email-campaigns');
+      
+      // Small delay to ensure the campaign status is updated
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      message.error('Failed to update payment status');
     }
   };
 
@@ -110,7 +128,7 @@ const PaymentForm = ({ campaignId, amount }) => {
         </Form.Item>
 
         <Form.Item label="Amount">
-          <Input value={`$${amount}`} disabled />
+          <Input value={`£${amount}`} disabled />
         </Form.Item>
 
         <Form.Item label="Card Details">

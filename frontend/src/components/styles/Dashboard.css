@@ -65,8 +65,6 @@
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
 }
 
-
-
 .card-number {
   font-size: 2rem;
   font-weight: bold;
@@ -124,6 +122,36 @@ body, html {
   padding: 0;
   overflow: hidden; /* Prevent scrolling */
   height: 100%;
+}
+
+/* Header Buttons */
+.campaigns-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.create-campaign-btn {
+  background-color: #1890ff;
+  border-color: #1890ff;
+}
+
+.create-campaign-btn:hover {
+  background-color: #40a9ff;
+  border-color: #40a9ff;
+}
+
+.create-campaign-btn[disabled] {
+  background-color: #d9d9d9 !important;
+  border-color: #d9d9d9 !important;
+  color: rgba(0, 0, 0, 0.25) !important;
+  cursor: not-allowed;
 }
 
 /* Responsive Adjustments */

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import axiosInstance from "../utils/axios";
 import Sidebar from "./Sidebar"; 
 import "./styles/EmailCampaigns.css";
+import { convertToSpintax, generateSpintaxVariations } from '../utils/spintax';
 
 const { TextArea } = Input;
 
@@ -13,9 +14,30 @@ const EmailCampaigns = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isDetailsModalVisible, setIsDetailsModalVisible] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [isGmailModalVisible, setIsGmailModalVisible] = useState(false);
+  const [gmailAccounts, setGmailAccounts] = useState([]);
+  const [selectedGmailAccount, setSelectedGmailAccount] = useState(null);
   const [cities, setCities] = useState([]);
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const [spintaxPreview, setSpintaxPreview] = useState([]);
+  const [isSpintaxModalVisible, setIsSpintaxModalVisible] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+
+  // Check subscription status
+  const checkSubscriptionStatus = useCallback(async () => {
+    try {
+      const response = await axiosInstance.get("/api/subscribe/status");
+      setIsSubscribed(response.data.isSubscribed);
+    } catch (error) {
+      console.error("Error checking subscription status:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkSubscriptionStatus();
+  }, [checkSubscriptionStatus]);
 
   // Fetch campaigns from backend
   const fetchCampaigns = useCallback(async () => {
@@ -70,16 +92,32 @@ const EmailCampaigns = () => {
     }
   };
 
+  // Load Gmail accounts
+  const loadGmailAccounts = useCallback(() => {
+    const savedAccounts = localStorage.getItem('gmailAccounts');
+    if (savedAccounts) {
+      setGmailAccounts(JSON.parse(savedAccounts));
+    }
+  }, []);
+
   useEffect(() => {
     fetchCities();
     fetchCampaigns();
-  }, [fetchCities, fetchCampaigns]);
+    checkSubscriptionStatus();
+    loadGmailAccounts();
+  }, [fetchCities, fetchCampaigns, checkSubscriptionStatus, loadGmailAccounts]);
 
   // Create new campaign
   const handleCreateCampaign = async (values) => {
     try {
       const { name, city, emailContent, recipients } = values;
       
+      // Validate email content
+      if (!emailContent || emailContent.trim() === '') {
+        message.error('Please input email content');
+        return;
+      }
+
       // Convert recipients string to array if it's not already
       const recipientsArray = typeof recipients === 'string' 
         ? recipients.split(',').map(email => email.trim())
@@ -90,7 +128,7 @@ const EmailCampaigns = () => {
         {
           name,
           city,
-          emailContent,
+          emailContent: emailContent.trim(),
           recipients: recipientsArray
         }
       );
@@ -110,40 +148,51 @@ const EmailCampaigns = () => {
     }
   };
 
-  // Handle running a campaign
-  const handleRunCampaign = async (campaign) => {
-    if (campaign.paymentStatus !== "paid") {
-      message.info("You need to pay before running this campaign.");
-      navigate(`/payment?campaignId=${campaign.id}&amount=20`);
+  const handleRunCampaign = async (campaignId) => {
+    try {
+      // Always show Gmail account selection modal for all users
+      setIsGmailModalVisible(true);
+      setSelectedCampaignId(campaignId);
+    } catch (error) {
+      console.error("Error running campaign:", error);
+      message.error("Failed to run campaign");
+    }
+  };
+  
+  const handleGmailAccountSelect = async () => {
+    if (!selectedGmailAccount) {
+      message.error("Please select a Gmail account");
       return;
     }
 
     try {
-      const response = await axiosInstance.post(
-        `/api/email-campaigns/${campaign.id}/run`
-      );
-
-      if (response.data.errors) {
-        // If there were any errors, show them but also acknowledge partial success
-        message.warning('Campaign completed with some issues. Check the details for more information.');
-      } else {
-        message.success('Campaign started successfully!');
-      }
+      setLoading(true);
       
-      fetchCampaigns();
+      // First check if user is subscribed
+      const userResponse = await axiosInstance.get('/api/users/me');
+      const isSubscribed = userResponse.data.isSubscribed;
+
+      console.log(`Running campaign with ID: ${selectedCampaignId}`);
+      console.log(`Using Gmail account: ${selectedGmailAccount}`);
+      console.log(`User is subscribed: ${isSubscribed}`);
+  
+      // For both subscribed and non-subscribed users
+      const response = await axiosInstance.post(`/api/email-campaigns/run/${selectedCampaignId}`, {
+        gmailAccount: selectedGmailAccount,
+        isSubscribed: isSubscribed // Pass subscription status to backend
+      });
+      
+      if (response.data.success) {
+        message.success("Campaign started successfully!");
+        fetchCampaigns(); // Refresh the campaigns list
+      }
     } catch (error) {
-      const errorData = error.response?.data;
-
-      if (errorData?.error === "Gmail permissions required" || errorData?.error === "Google session expired") {
-        message.error(errorData.message);
-        window.location.href = `${axiosInstance.defaults.baseURL}/auth/google`;
-        return;
-      }
-
-      message.error(errorData?.error || "Failed to run campaign");
-      if (error.response?.status === 401) {
-        navigate("/login");
-      }
+      console.error("Error running campaign:", error);
+      message.error(error.response?.data?.error || "Failed to run campaign");
+    } finally {
+      setLoading(false);
+      setIsGmailModalVisible(false);
+      setSelectedCampaignId(null);
     }
   };
 
@@ -159,6 +208,14 @@ const EmailCampaigns = () => {
         navigate("/login");
       }
     }
+  };
+
+  const handleSpintaxConvert = () => {
+    const currentText = form.getFieldValue('emailContent');
+    const spintaxText = convertToSpintax(currentText);
+    const variations = generateSpintaxVariations(spintaxText, 5);
+    setSpintaxPreview(variations);
+    setIsSpintaxModalVisible(true);
   };
 
   // Handle showing campaign details
@@ -202,7 +259,7 @@ const EmailCampaigns = () => {
         <Space>
           <Button
             type="primary"
-            onClick={() => handleRunCampaign(record)}
+            onClick={() => handleRunCampaign(record.id)}
             disabled={record.status === "Sent"}
           >
             Run Campaign
@@ -210,7 +267,7 @@ const EmailCampaigns = () => {
           {record.paymentStatus === "unpaid" && (
             <Button
               onClick={() =>
-                navigate(`/payment?campaignId=${record.id}&amount=20`)
+                navigate(`/payment?campaignId=${record.id}&amount=10`)
               }
             >
               Pay Now
@@ -234,12 +291,29 @@ const EmailCampaigns = () => {
     },
   ];
 
+  const handleSubscribeClick = () => {
+    navigate('/subscribe');
+  };
+
   return (
     <div className="dashboard-layout">
       <Sidebar />
       <div className="dashboard-main">
         <div className="campaigns-header">
           <h1>Email Campaigns</h1>
+          {isSubscribed ? (
+            <Button className="subscription-status-btn" disabled>
+              Already Subscribed
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              className="subscribe-btn"
+              onClick={handleSubscribeClick}
+            >
+              Subscribe Now!
+            </Button>
+          )}
           <Button
             type="primary"
             onClick={() => setIsModalVisible(true)}
@@ -259,114 +333,236 @@ const EmailCampaigns = () => {
         {/* Create Campaign Modal */}
         <Modal
           title="Create New Campaign"
-          open={isModalVisible}
-          onCancel={() => setIsModalVisible(false)}
+          visible={isModalVisible}
+          onCancel={() => {
+            setIsModalVisible(false);
+            form.resetFields();
+          }}
           footer={null}
-          className="campaign-modal"
         >
-          <Form form={form} onFinish={handleCreateCampaign} layout="vertical">
-            <div className="form-field">
-              <label className="form-label">Campaign Name *</label>
-              <Form.Item
-                name="name"
-                rules={[
-                  {
-                    required: true,
-                    message: "Please enter a campaign name",
-                  },
-                ]}
+          <Form 
+            form={form} 
+            onFinish={handleCreateCampaign} 
+            layout="vertical"
+            initialValues={{
+              emailContent: '',
+              recipients: ''
+            }}
+          >
+            <Form.Item
+              name="name"
+              label={<span style={{ color: '#000000' }}>Campaign Name</span>}
+              rules={[{ required: true, message: "Please input campaign name!" }]}
+            >
+              <Input placeholder="Enter your campaign name" />
+            </Form.Item>
+
+            <Form.Item
+              name="city"
+              label={<span style={{ color: '#000000' }}>Select City</span>}
+              rules={[{ required: true, message: "Please select a city!" }]}
+            >
+              <Select
+                onChange={handleCityChange}
+                placeholder="Select a city"
+                allowClear
               >
-                <Input placeholder="Enter your campaign name" />
-              </Form.Item>
-            </div>
+                {cities.map((city) => (
+                  <Select.Option key={city} value={city}>
+                    {city}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
 
-            <div className="form-field">
-              <label className="form-label">Select City</label>
-              <Form.Item name="city">
-                <Select
-                  placeholder="Select a city to load venues"
-                  onChange={handleCityChange}
-                  allowClear
-                >
-                  {cities.map(city => (
-                    <Select.Option key={city} value={city}>
-                      {city}
-                    </Select.Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </div>
+            <Form.Item
+              name="recipients"
+              label={<span style={{ color: '#000000' }}>Recipients</span>}
+              rules={[{ required: true, message: "Please input recipients!" }]}
+            >
+              <TextArea rows={4} placeholder="Enter recipients (separated by commas)" />
+            </Form.Item>
 
-            <div className="form-field">
-              <label className="form-label">Recipients (Email Addresses) *</label>
-              <Form.Item
-                name="recipients"
-                rules={[
-                  {
-                    required: true,
-                    message: "Please enter at least one recipient email",
-                  },
-                ]}
-                extra="Emails will be automatically populated when you select a city, or you can enter them manually (separated by commas)"
+            <Form.Item
+              name="emailContent"
+              label={<span style={{ color: '#000000' }}>Email Content</span>}
+              rules={[
+                { 
+                  required: true, 
+                  message: "Please input email content!",
+                  validator: (_, value) => {
+                    if (!value || value.trim() === '') {
+                      return Promise.reject('Please input email content!');
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
+            >
+              <TextArea 
+                rows={6} 
+                placeholder="Enter email content"
+                onChange={(e) => {
+                  form.setFieldsValue({ emailContent: e.target.value });
+                }}
+              />
+              <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                Change your words with Spintax?
+              </div>
+            </Form.Item>
+
+            <Space>
+              <Button onClick={handleSpintaxConvert} type="default">
+                Preview with Spintax
+              </Button>
+              <Button 
+                type="primary" 
+                htmlType="submit"
+                onClick={() => {
+                  const content = form.getFieldValue('emailContent');
+                  if (!content || content.trim() === '') {
+                    message.error('Please input email content');
+                    return;
+                  }
+                }}
               >
-                <TextArea
-                  rows={4}
-                  placeholder="e.g., email1@example.com, email2@example.com"
-                />
-              </Form.Item>
-            </div>
-
-            <div className="form-field">
-              <label className="form-label">Email Content *</label>
-              <Form.Item
-                name="emailContent"
-                rules={[
-                  {
-                    required: true,
-                    message: "Please enter your email content",
-                  },
-                ]}
-              >
-                <TextArea
-                  rows={6}
-                  placeholder="Write your email content here..."
-                />
-              </Form.Item>
-            </div>
-
-            <Form.Item>
-              <Button type="primary" htmlType="submit" block>
                 Create Campaign
               </Button>
-            </Form.Item>
+            </Space>
           </Form>
         </Modal>
 
         {/* Campaign Details Modal */}
         <Modal
           title="Campaign Details"
-          open={isDetailsModalVisible}
+          visible={isDetailsModalVisible}
           onCancel={() => setIsDetailsModalVisible(false)}
-          footer={[
-            <Button key="close" onClick={() => setIsDetailsModalVisible(false)}>
-              Close
-            </Button>
-          ]}
+          footer={null}
         >
           {selectedCampaign && (
             <div>
               <p><strong>Name:</strong> {selectedCampaign.name}</p>
               <p><strong>Status:</strong> {selectedCampaign.status}</p>
-              <p><strong>Payment Status:</strong> {selectedCampaign.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}</p>
+              <p><strong>Created At:</strong> {selectedCampaign.createdAt ? new Date(selectedCampaign.createdAt).toLocaleString() : 'Not available'}</p>
               <p><strong>Recipients:</strong></p>
-              <ul>
-                {selectedCampaign.recipients.map((recipient, index) => (
-                  <li key={index}>{recipient}</li>
-                ))}
-              </ul>
+              <TextArea
+                value={selectedCampaign.recipients.join(", ")}
+                readOnly
+                rows={4}
+              />
+              <p><strong>Email Content:</strong></p>
+              <TextArea
+                value={selectedCampaign.emailContent}
+                readOnly
+                rows={6}
+              />
             </div>
           )}
         </Modal>
+
+        <Modal
+          title="Spintax Preview"
+          visible={isSpintaxModalVisible}
+          onCancel={() => setIsSpintaxModalVisible(false)}
+          width={800}
+          footer={[
+            <Button key="back" onClick={() => setIsSpintaxModalVisible(false)}>
+              Cancel
+            </Button>,
+            <Button 
+              key="submit" 
+              type="primary" 
+              onClick={() => {
+                const currentText = form.getFieldValue('emailContent');
+                const spintaxText = convertToSpintax(currentText);
+                form.setFieldsValue({ emailContent: spintaxText });
+                setIsSpintaxModalVisible(false);
+              }}
+            >
+              Use Spintax Template
+            </Button>
+          ]}
+        >
+          <div>
+            <div style={{ marginBottom: '20px', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '4px' }}>
+              <h4 style={{ marginBottom: '10px' }}>Two options:</h4>
+              <ol style={{ paddingLeft: '20px' }}>
+                <li>Click any variation below to use that specific version</li>
+                <li>Or click "Use Spintax Template" to get random variations for each recipient</li>
+              </ol>
+            </div>
+            
+            {spintaxPreview.map((variation, index) => (
+              <div 
+                key={index} 
+                style={{ 
+                  marginBottom: '20px', 
+                  padding: '15px',
+                  border: '1px solid #e8e8e8',
+                  borderRadius: '4px',
+                  position: 'relative'
+                }}
+              >
+                <div style={{ marginBottom: '10px' }}>
+                  <strong>Variation {index + 1}:</strong>
+                </div>
+                <div style={{ 
+                  whiteSpace: 'pre-wrap',
+                  marginBottom: '10px',
+                  paddingRight: '80px' // Make room for the button
+                }}>
+                  {variation}
+                </div>
+                <Button
+                  type="primary"
+                  size="small"
+                  style={{
+                    position: 'absolute',
+                    right: '15px',
+                    top: '15px'
+                  }}
+                  onClick={() => {
+                    form.setFieldsValue({ emailContent: variation });
+                    message.success('Email content updated!');
+                    setIsSpintaxModalVisible(false);
+                  }}
+                >
+                  Click to Use
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+
+        {/* Gmail Account Selection Modal */}
+        <Modal
+          title="Select Gmail Account"
+          visible={isGmailModalVisible}
+          onOk={handleGmailAccountSelect}
+          onCancel={() => {
+            setIsGmailModalVisible(false);
+            setSelectedGmailAccount(null);
+          }}
+          okText="Run Campaign"
+          cancelText="Cancel"
+        >
+          <div className="gmail-account-selection">
+            <p>Select the Gmail account to use for sending this campaign:</p>
+            <Select
+              style={{ width: '100%' }}
+              placeholder="Select Gmail Account"
+              value={selectedGmailAccount}
+              onChange={(value) => setSelectedGmailAccount(value)}
+            >
+              {gmailAccounts.map((email) => (
+                <Select.Option key={email} value={email}>
+                  {email}
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
+        </Modal>
+        
       </div>
     </div>
   );

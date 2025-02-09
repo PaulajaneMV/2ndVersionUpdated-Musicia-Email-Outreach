@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
@@ -23,56 +23,81 @@ const Dashboard = () => {
   });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(""); // State for real-time clock
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-  
-        // Get the token from localStorage
-        const token = localStorage.getItem("token");
-  
-        if (!token) {
-          setError("No authentication token found");
-          navigate("/"); // Redirect to login if no token
-          return;
-        }
-  
-        // Make the API request
-        const response = await axios.get("http://localhost:5000/api/dashboard", {
-          headers: {
-            Authorization: `Bearer ${token}`, // Pass token in Authorization header
-            "Content-Type": "application/json",
-          },
-        });
-  
-        // Update the dashboard state with response data
-        if (response.data) {
-          setSummary({
-            totalCampaigns: Number(response.data.totalCampaigns) || 0,
-            totalEmailsSent: Number(response.data.totalEmailsSent) || 0,
-            averageEngagementRate: Number(response.data.averageEngagementRate) || 0,
-            totalNewLeads: Number(response.data.totalNewLeads) || 0,
-          });
-        } else {
-          throw new Error("Invalid response data");
-        }
-      } catch (err) {
-        console.error("Error fetching dashboard data:", err);
-        setError(err.response?.data?.error || "Failed to fetch dashboard data");
-        if (err.response?.status === 401) {
-          navigate("/"); // Redirect to login if unauthorized
-        }
-      } finally {
-        setLoading(false);
+  // Function to load dashboard data
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Get the token from localStorage
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        setError("No authentication token found");
+        navigate("/"); // Redirect to login if no token
+        return;
       }
-    };
-  
-    fetchData();
+
+      // Make the API request
+      const response = await axios.get("http://localhost:5000/api/dashboard", {
+        headers: {
+          Authorization: `Bearer ${token}`, // Pass token in Authorization header
+          "Content-Type": "application/json",
+        },
+      });
+
+      // Update the dashboard state with response data
+      if (response.data) {
+        setSummary({
+          totalCampaigns: Number(response.data.totalCampaigns) || 0,
+          totalEmailsSent: Number(response.data.totalEmailsSent) || 0,
+          averageEngagementRate: Number(response.data.averageEngagementRate) || 0,
+          totalNewLeads: Number(response.data.totalNewLeads) || 0,
+        });
+      } else {
+        throw new Error("Invalid response data");
+      }
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+      setError(err.response?.data?.error || "Failed to fetch dashboard data");
+      if (err.response?.status === 401) {
+        navigate("/"); // Redirect to login if unauthorized
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [navigate]);
-  
+
+  // Update real-time clock
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      const formattedTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const formattedDate = now.toLocaleDateString();
+      setCurrentTime(`${formattedDate} ${formattedTime}`);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Handle initial data loading and token from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+
+    if (token) {
+      // Store the token
+      localStorage.setItem("token", token);
+      // Remove token from URL without triggering a refresh
+      window.history.replaceState({}, document.title, "/dashboard");
+    }
+
+    // Load dashboard data
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   // Example graph data based on summary
   const graphData = [
@@ -126,6 +151,7 @@ const Dashboard = () => {
       <div className="dashboard-main">
         <div className="dashboard-header">
           <h2>Dashboard</h2>
+          <div className="realtime-clock">{currentTime}</div> {/* Real-time clock */}
         </div>
 
         <div className="dashboard-cards">

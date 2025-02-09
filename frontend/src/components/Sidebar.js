@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import "./styles/Sidebar.css";
+import { auth } from "../firebase";
+import { signOut } from "firebase/auth";
 
 const Sidebar = () => {
-  const [isMinimized, setIsMinimized] = useState(true);
+  const [isMinimized, setIsMinimized] = useState(window.innerWidth <= 768); // Start minimized on small screens
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -11,8 +13,15 @@ const Sidebar = () => {
     setIsMinimized(!isMinimized);
   };
 
-  const handleLogout = () => {
-    navigate("/");
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      localStorage.clear();
+      sessionStorage.clear();
+      navigate("/");
+    } catch (error) {
+      console.error("Error during logout:", error);
+    }
   };
 
   return (
@@ -61,6 +70,13 @@ const Sidebar = () => {
         </Link>
 
         <Link
+          to="/manage-accounts"
+          className={`sidebar-item ${location.pathname === "/manage-accounts" ? "active" : ""}`}
+        >
+          {!isMinimized && <span>Manage Gmail</span>}
+        </Link>
+
+        <Link
           to="/settings"
           className={`sidebar-item ${location.pathname === "/settings" ? "active" : ""}`}
         >
@@ -73,9 +89,6 @@ const Sidebar = () => {
         >
           {!isMinimized && <span>Help</span>}
         </Link>
-
-        {/* Add Payment Page Link */}
-
 
         <button className="sidebar-item logout-btn" onClick={handleLogout}>
           {!isMinimized && <span>Logout</span>}
